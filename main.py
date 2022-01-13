@@ -1,16 +1,20 @@
-from Neo4jConnection import Neo4jConnection
+from google.protobuf import message
+from API.Neo4jConnection import Neo4jConnection
 import openmined_psi as psi
 import json
 import pandas as pd
 
+
 conn = Neo4jConnection(uri="bolt://localhost:7687", user="reena", pwd="1234")
+print("Connected to Data base")
 
 query_string = "use customerdata MATCH (n) RETURN n"
 resp = conn.query(query_string, db = "neo4j")
-# print(resp)
 
+print("\nCustomer Data:")
 nodelist_customerdata = [record["n"]["name"] for record in resp]
 
+print("\nCustomer Data:")
 print(nodelist_customerdata)
 
 q = "use localtransactions MATCH (cust {name: 'Dacia Canty'})-[:LOCAL_TRANSFER|TO*2..]->(n) RETURN n"
@@ -19,8 +23,8 @@ resp = conn.query(q, db = "neo4j")
 
 nodelist_localtranactiondata = [record["n"]["name"] for record in resp]
 
+print("\nOutward nodes from Dacia")
 print(nodelist_localtranactiondata)
-
 
 c = psi.client.CreateWithNewKey(True)
 s = psi.server.CreateWithNewKey(True)
@@ -30,15 +34,32 @@ server_items = nodelist_localtranactiondata
 
 fpr = 1.0 / (1000000000)
 setup = s.CreateSetupMessage(fpr, len(client_items), server_items)
-request = c.CreateRequest(client_items)
+msg = c.CreateRequest(client_items)
+
+# print(request.encrypted_elements)
+# buff = request.SerializeToString()
+
+buff = msg.SerializeToString()
+
+dst = psi.Request()
+dst.ParseFromString(buff)
+request = dst
+
+# request = dup(True, c.CreateRequest(client_items), psi.Request())
+print(request)
+# print(req)
+
 resp = s.ProcessRequest(request)
 
 intersection = c.GetIntersection(setup, resp)
 # iset = set(intersection)
-print(intersection)
+print("First Intersection" + str(intersection))
 
 custAndlocaltransaction = [client_items[i] for i in intersection]
+custAndlocaltransaction = server_items
 print(custAndlocaltransaction)
+
+
 
 q = "use foreigntransactions MATCH (n) WHERE n.name IN " + str(custAndlocaltransaction) + " MATCH (n)-[:OVERSEA_TRANSFER_OUT|TO|OVERSEA_TRANSFER_IN|FROM*1..]->(m) RETURN m"
 print(q)
@@ -65,7 +86,9 @@ print(server_items)
 
 fpr = 1.0 / (1000000000)
 setup = s.CreateSetupMessage(fpr, len(client_items), server_items)
+
 request = c.CreateRequest(client_items)
+
 resp = s.ProcessRequest(request)
 
 fpr = 1.0 / (1000000000)
@@ -81,16 +104,11 @@ custAndlocaltransaction = [client_items[i] for i in intersection]
 print(custAndlocaltransaction)
 
 #Check relationship between both?
-
-
 # q = "use foreigntransactions MATCH (n) -[:TO*1..]->(n) RETURN n"
 # resp = conn.query(q, db = "neo4j")
 # # print(resp)
 # nodelist_foreigntransactiondata = [record["n"]["name"] for record in resp]
 # print(nodelist_foreigntransactiondata)
-
-
-
 
 
 def dup(do, msg, dst):
@@ -148,8 +166,10 @@ def test_client_server(reveal_intersection, duplicate):
     setup = dup(
         duplicate, s.CreateSetupMessage(fpr, len(client_items), server_items), psi.ServerSetup()
     )
+    
 
     request = dup(duplicate, c.CreateRequest(client_items), psi.Request())
+    # print(request)
     resp = dup(duplicate, s.ProcessRequest(request), psi.Response())
 
     if reveal_intersection:
@@ -185,3 +205,5 @@ def test_server_client(reveal_intersection):
         intersection = c.GetIntersectionSize(setup, resp)
         assert intersection >= (len(client_items) / 2.0)
         assert intersection <= (1.1 * len(client_items) / 2.0)
+
+test_client_server(True, True)
