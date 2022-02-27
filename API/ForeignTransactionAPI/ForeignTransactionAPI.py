@@ -1,7 +1,6 @@
 from Neo4jConnection import Neo4jConnection
 import openmined_psi as psi
 import requests
-import json
 import flask
 from flask import Flask, request
 from google.protobuf.json_format import MessageToJson
@@ -14,113 +13,71 @@ app = Flask(__name__)
 api = Api(app)
 
 conn = Neo4jConnection(uri="bolt://localhost:7687", user="reena", pwd="1234")
-# c = None
-# s = None
-# current_server_items = None
-
 DATABASE_ID = "FT"
 REQUEST_ID_LENGTH = 10
 
 LT_URL = "http://127.0.0.1:5000"
+ST_URL = "http://127.0.0.1:5002"
+CU_URL = "http://127.0.0.1:5003"
 
-APIAddressBook = {"LT" : LT_URL, "CU" : None, "ST" : None}
+APIAddressBook = {"LT" : LT_URL, "CU" : CU_URL, "ST" : ST_URL}
 LoopLog = {}
 ServerDirectory = {}
 
-@app.route("/")
-def hello_world():
-    resp = requests.get(LT_URL+"/MainStart")
-    print(json.loads(resp.content)["Intersection"][0])
-    return "ok"
+@app.route("/TestAPI", methods=["GET"])
+def Test():
+    return {"message" : "hello"}
+
+@app.route("/StartLoopSearch", methods=["GET"])
+def StartLoopSearch():
+    StartNode = flask.request.args["start_node"]
+
+    if StartNode not in GetAllEntities():
+        return "Start node: " + StartNode + " does not exist in this KG"
+
+    LoopID = GenerateRequestID()
+    print("Loop search started, Loop ID: " + LoopID)
+    LoopLog[LoopID] = StartNode
+    OutwardNodes = GetOutwardNodes([StartNode]) + [StartNode]
+
+    Path = ",".join([DATABASE_ID])
+    for api in APIAddressBook.keys():
+        PSIRequestID = GenerateRequestID()
+        print("[INFO]: Initiating PSI with " + api + " API")
+        print("[INFO]: Request ID generated: " + PSIRequestID)
+        ServerDirectory[PSIRequestID] = OutwardNodes
+
+        URL = APIAddressBook.get(api)
+        response = requests.get(URL + "/PSI", params={"initiator_id" : DATABASE_ID, "end_id" : DATABASE_ID, "path" : Path, "psi_request_id" : PSIRequestID, "loop_id" : LoopID})
+        print("[INFO]: Response: " + response.json()["msg"])
+
+        if response.json()["msg"] == "Found":
+            DisposeLoopID(LoopID)
+            return "Loop found"
+
+    DisposeLoopID(LoopID)
+    return "Loop Not Found"
   
-@app.route("/Trigger", methods=["Get"])
-def Trigger():
-
-    StartDB = flask.request.args["StartDB"]
-    CallingDB = flask.request.args["CallingDB"]
-
-    q = "use foreigntransactions MATCH (n) RETURN n"
-    resp = conn.query(q, db = "neo4j")
-    nodelist_foreigntransactiondata = [record["n"]["name"] for record in resp]
-
-    client_items = nodelist_foreigntransactiondata
-    c = psi.client.CreateWithNewKey(True)
-    request = c.CreateRequest(client_items)
-    
-    buff = request.SerializeToString()
-
-    response = requests.get(LT_URL + "/GetSetUpAndResponse", data=buff)
-    print("RESPONSE")
-    print(response)
-    response_msg = response.json()
-    print(response_msg)
-
-    setup_msg = response_msg["setup"]
-    print("SETUP message received")
-    resp_msg = response_msg["resp"]
-    print("resp message received")
-
-    dstServer = psi.ServerSetup()
-    json_format.Parse(setup_msg, dstServer)
-    setup = dstServer
-    
-    dstResp = psi.Response()
-    json_format.Parse(resp_msg, dstResp)
-    print("done")
-    resp = dstResp
-
-    intersection = c.GetIntersection(setup, resp)
-    print("INTERSECTION FOUND")
-    print(intersection)
-    # q = "use foreigntransactions MATCH (n) WHERE n.name IN " + str(intersection) + " MATCH (n)-[:OVERSEA_TRANSFER_OUT|TO|OVERSEA_TRANSFER_IN|FROM*1..]->(m) RETURN m"
-    # print(q)
-    # resp = conn.query(q, db = "neo4j")
-    # # print(resp)
-
-    # nodelist_foreigntransactiondata = [record["m"]["name"] for record in resp]
-    # print(nodelist_foreigntransactiondata)
-    
-    #Call all databases
-
-    if len(intersection) == 0:
-        return None
-    else:
-        return TriggerRest(intersection, StartDB)
-
-def TriggerRest(Intersection, StartDB):
-    global current_server_items
-    current_server_items = Intersection
-
-    # for API_name in API_List.keys:
-    #     if API_name != DatabaseName:
-    #         (API_List.get(API_name)).Trigger(StartDB, DatabaseName)
-
-    resp = requests.get(LT_URL + "/Trigger", params = {"StartDB" : StartDB, "CallingDB": DATABASE_ID})
-
-    return resp
 
 @app.route("/GetSetUpAndResponse", methods=["GET"])
 def GetSetUpAndResponse():
-
-    print("[INFO]: client request to setup server received")
-    print("[INFO]: client ID: " + str(request.args.get("ID")))
+    print("[INFO]: Client request to setup server received")
+    print("[INFO]: Client ID: " + str(request.args.get("ID")))
 
     ClientSetSize = int(request.args.get("set_size"))
     ClientRequestMessage = request.data
-    print("[INFO]: client set size: " + str(ClientSetSize))
+    print("[INFO]: Client set size: " + str(ClientSetSize))
 
     dstReq = psi.Request()
     dstReq.ParseFromString(ClientRequestMessage)
     ClientRequest = dstReq
-    print("[DEBUG]: client request processed")
     
     fpr = 1.0 / (1000000000)
     s = psi.server.CreateWithNewKey(True)
 
     PsiRequestID = request.args.get("psi_request_id")
-    # ServerSet = GetAllEntities()
     ServerSet = ServerDirectory.get(PsiRequestID)
-    print("DEBUG: datatype: " + str(type(fpr)) + " " + str(type(ClientSetSize)) + " " + str(type(ServerSet[0])))    
+    # print("DEBUG: datatype: " + str(type(fpr)) + " " + str(type(ClientSetSize)) + " " + str(type(ServerSet[0])))    
     setup = s.CreateSetupMessage(fpr, ClientSetSize, ServerSet)
     resp = s.ProcessRequest(ClientRequest)
 
@@ -154,31 +111,50 @@ def TestSingleLoop():
 
 @app.route("/PSI", methods=["GET"])
 def StartPSI():
+    # print("[INFO]: PSI Initiated " + str(flask.request))
     EndAPI = flask.request.args["end_id"]
     PSIRequestID = flask.request.args["psi_request_id"]
     LoopID = flask.request.args["loop_id"]
+    PathList = (flask.request.args["path"]).split(",")
+    print("[DEBUG]: Path retrieved: " + str(PathList))
+    PathList.append(DATABASE_ID)
+    PathListString = ",".join(PathList)
+    # print("[DEBUG]: Path List: " + str(PathList))
 
     client_items = GetAllEntities()
     Initiator_ID = flask.request.args["initiator_id"]
     URL = APIAddressBook.get(Initiator_ID)
 
     Intersection = InitiatePSI(client_items, URL, PSIRequestID)
-    OutwardNodes = GetOutwardNodes(Intersection)
-    
+    OutwardNodes = GetOutwardNodes(Intersection)   
+
+    if OutwardNodes == []:
+        return {"msg" : "Not Found"}
 
     if (EndAPI == DATABASE_ID):
         StartNode = LoopLog.get(LoopID)
         if StartNode in OutwardNodes:
-            return {"msg" : "Loop exist"}
+            return {"msg" : "Found"}
+        else:
+            return {"msg" : "Not Found"}
 
     for api in APIAddressBook.keys():
+        if api in PathList and api != EndAPI:
+            continue
         API_URL = APIAddressBook.get(api)
         PSIRequestID = GenerateRequestID()
         ServerDirectory[PSIRequestID] = OutwardNodes
         
-        print("[INFO]: Request ID generated: " + PSIRequestID)
-        response = requests.get(API_URL + "/PSI", params={"initiator_id" : DATABASE_ID, "end_id" : EndAPI, "psi_request_id" : PSIRequestID, "loop_id" : LoopID})
-        return response.json()
+        print("[INFO]: PSI initiating with " + api + " API")
+        print("[INFO]: Request ID: " + PSIRequestID)
+        # print("[DEBUG]: PSI initiation request sent")
+        response = requests.get(API_URL + "/PSI", params={"initiator_id" : DATABASE_ID, "end_id" : EndAPI, "path" : PathListString , "psi_request_id" : PSIRequestID, "loop_id" : LoopID})
+        print("[INFO]: Response: " + response.json()["msg"])
+
+        if response.json()["msg"] == "Found":
+            return {"msg" : "Found"}
+
+    return {"msg" : "Not Found"}
 
 @app.route("/TestPSI", methods=["GET"])
 def TestPSI():
@@ -188,7 +164,6 @@ def TestPSI():
     return {"intersection" : intersection}
 
 def InitiatePSI(client_items, URL, PSIRequestID):
-    print("[INFO]: FT API has initiated PSI")
     c = psi.client.CreateWithNewKey(True)
     request = c.CreateRequest(client_items)
     buff = request.SerializeToString()
@@ -202,16 +177,16 @@ def InitiatePSI(client_items, URL, PSIRequestID):
     dstServer = psi.ServerSetup()
     json_format.Parse(setup_msg, dstServer)
     setup = dstServer
-    print("[INFO]: setup message received from server")
+    print("[DEBUG]: Setup message received from server")
     
     dstResp = psi.Response()
     json_format.Parse(resp_msg, dstResp)
     resp = dstResp
-    print("[INFO]: resp message received from server")
+    print("[DEBUG]: Resp message received from server")
 
     intersection = c.GetIntersection(setup, resp)
     actualIntersection = [client_items[i] for i in intersection]
-    print("[INFO]: Intersection found: " + str(actualIntersection))
+    print("[INFO]: Intersection: " + str(actualIntersection))
     return actualIntersection
 
 def GetAllEntities():
@@ -223,7 +198,7 @@ def GetAllEntities():
 
 def GetOutwardNodes(Nodes):
     q = "use foreigntransactions MATCH (n) WHERE n.name IN " + str(Nodes) + " MATCH (n)-[:OVERSEA_TRANSFER_OUT|TO|OVERSEA_TRANSFER_IN|FROM*1..]->(m) RETURN m"
-    print("[DEBUG]: neo4j query: " + q)
+    # print("[DEBUG]: neo4j query: " + q)
     resp = conn.query(q, db = "neo4j")
     OutwardNodes = [record["m"]["name"] for record in resp]
     print("[DEBUG]: Outward Nodes found: " + str(OutwardNodes))
@@ -234,12 +209,12 @@ def GenerateRequestID():
 
 def DisposeServerSet(RequestID):
     ServerDirectory.pop(RequestID)
-    print("[INFO]: Server set removed; Request ID: " + RequestID)
+    print("[INFO]: Server set removed; Removed Request ID: " + RequestID)
     return
 
 def DisposeLoopID(LoopID):
     LoopLog.pop(LoopID)
-    print("[INFO]: Loop finished and removed; Loop ID: " + LoopID)
+    print("[INFO]: Loop finished and removed; Removed Loop ID: " + LoopID)
     return
 
 app.run(host='127.0.0.1', port=5001, debug=False, threaded=True)
