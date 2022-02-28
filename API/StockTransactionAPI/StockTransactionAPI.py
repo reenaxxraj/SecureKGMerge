@@ -21,7 +21,7 @@ FT_URL = "http://127.0.0.1:5001"
 LT_URL = "http://127.0.0.1:5000"
 CU_URL = "http://127.0.0.1:5003"
 
-APIAddressBook = {"FT" : FT_URL, "CU" : CU_URL, "LT" : LT_URL}
+APIAddressBook = {"CU" : CU_URL,"FT" : FT_URL, "LT" : LT_URL}
 LoopLog = {}
 ServerDirectory = {}
 

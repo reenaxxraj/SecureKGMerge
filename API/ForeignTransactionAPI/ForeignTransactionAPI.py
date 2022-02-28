@@ -20,7 +20,7 @@ LT_URL = "http://127.0.0.1:5000"
 ST_URL = "http://127.0.0.1:5002"
 CU_URL = "http://127.0.0.1:5003"
 
-APIAddressBook = {"LT" : LT_URL, "CU" : CU_URL, "ST" : ST_URL}
+APIAddressBook = {"CU" : CU_URL,"LT" : LT_URL, "ST" : ST_URL}
 LoopLog = {}
 ServerDirectory = {}
 
@@ -133,7 +133,7 @@ def StartPSI():
 
     if (EndAPI == DATABASE_ID):
         StartNode = LoopLog.get(LoopID)
-        if StartNode in OutwardNodes:
+        if StartNode in OutwardNodes or StartNode in Intersection:
             return {"msg" : "Found"}
         else:
             return {"msg" : "Not Found"}
