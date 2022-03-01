@@ -6,7 +6,7 @@ import flask
 from Neo4jConnection import Neo4jConnection
 from google.protobuf.json_format import MessageToJson
 from google.protobuf import json_format
-from flask import Flask, request
+from flask import Flask, abort, request
 from flask_restful import Api
 from colorama import Fore
 
@@ -24,44 +24,6 @@ API_ADDRESSBOOK = {"CU" : CU_URL, "FT" : FT_URL, "ST" : ST_URL}
 LoopLog = {}
 ServerDirectory = {}
 
-@app.route("/TestAPI", methods = ["GET"])
-def TestAPI():
-    """
-    Test function to check if API is set up and running successfully
-    ---
-    responses:
-        200:
-        description: Default message (for testing)
-        schema:
-            api: string
-            msg: 
-                type: string
-                default: API is up and running
-    """
-    return { "api": DATABASE_ID, "msg" : "API is up and running" }
-
-@app.route("/TestPSI", methods=["GET"])
-def TestPSI():
-    """
-    To perform PSI (Private Set Intersection) with another API's KG
-    ---
-    parameters:
-        api_id: string
-    responses:
-        200:
-        description: Returns intersection between this API's KG and the other API's KG
-        schema:
-            api: User
-            intersection:
-                type: list
-                description: list of intersecting nodes
-    """
-    ClientItems = GetAllEntities()
-    API_ID = str(request.args.get("api_id"))
-    URL = API_ADDRESSBOOK.get(API_ID)
-    Intersection = InitiatePSI(ClientItems, URL)
-    return {"api": API_ID, "intersection" : Intersection}
-
 @app.route("/StartLoopSearch", methods=["GET"])
 def StartLoopSearch():
     """
@@ -69,21 +31,32 @@ def StartLoopSearch():
     ---
     parameters:
         start_node: 
-            type: string
-            description: start node to begin loop search from
+            type:           string
+            description:    start node to begin loop search
     responses:
         200:
-        description: Returns intersection between this API's KG and the other API's KG
-        schema:
-            api: User
-            intersection:
-                type: list
-                description: list of intersecting nodes
+            description: Returns a report on loop findings
+            schema:
+                current_api: string
+                report:
+                    paths_searched: 
+                        type:           list of lists of strings
+                        description:    list of all paths that were searched
+                        example:        [["FT", "LT", "FT"], ["FT", "CU"]]
+                    loop_found:
+                        type:           Boolean
+                        description:    True if loop found; Fales if loop not found
+                    path_found:
+                        type:           list of strings
+                        description:    if loop_found == True, returns the path of the loop. Else, returns None.
+                        example:        ["FT", "LT", "FT"], None
+        404:
+            description: Start node was not found in this API's KG
     """
     StartNode = flask.request.args["start_node"]
   
     if StartNode not in GetAllEntities():
-        return "Start node: " + StartNode + " does not exist in this KG"
+        abort(404, description="Start node:" + StartNode + " does not exist in this KG. Unable to conduct search.")
 
     LoopID = GenerateRequestID()
     PrintInfo("Loop search started...")
@@ -91,7 +64,10 @@ def StartLoopSearch():
     LoopLog[LoopID] = StartNode
     OutwardNodes = GetOutwardNodes([StartNode]) + [StartNode]
 
-    Path = ",".join([DATABASE_ID])
+    PathSoFar = [DATABASE_ID]
+    PathsSearched = []
+    LoopFound = False
+    PathFound = None
     for api in API_ADDRESSBOOK.keys():
         PSIRequestID = GenerateRequestID()
         PrintInfo("Initiating PSI with " + api + " API...")
@@ -99,15 +75,18 @@ def StartLoopSearch():
         ServerDirectory[PSIRequestID] = OutwardNodes
 
         URL = API_ADDRESSBOOK.get(api)
-        response = requests.get(URL + "/PSI", params={"initiator_id" : DATABASE_ID, "end_id" : DATABASE_ID, "path" : Path, "psi_request_id" : PSIRequestID, "loop_id" : LoopID})
-        PrintDebug("Response: " + response.json()["msg"])
+        response = requests.get(URL + "/PSI", params={"initiator_id" : DATABASE_ID, "end_id" : DATABASE_ID, "path_so_far" : PathSoFar, "psi_request_id" : PSIRequestID, "loop_id" : LoopID})
+        LoopFound = response.json()["loop_found"]
+        PathsSearched += response.json()["paths_searched"]
+        PrintDebug("Path Searched: " + str(PathsSearched))
+        PrintInfo("Response: Loop_found = " + str(response.json()["loop_found"]))
 
-        if response.json()["msg"] == "Found":
-            DisposeLoopID(LoopID)
-            return "Loop found"
+        if LoopFound == True:
+            PathFound = response.json()["path_found"]
+            break
 
     DisposeLoopID(LoopID)
-    return "Loop Not Found"
+    return {"current_api": DATABASE_ID, "report": {"path_searched": PathsSearched, "loop_found": LoopFound, "path_found": PathFound}}
 
 @app.route("/GetSetUpAndResponse", methods=["GET"])
 def GetSetUpAndResponse():
@@ -153,51 +132,6 @@ def GetSetUpAndResponse():
     DisposeServerSet(PsiRequestID)
     return {"setup": setupJson, "resp": respJson}
 
-@app.route("/TestSingleLoop", methods=["GET"])
-def TestSingleLoop():
-    """
-    To begin the loop search beginning with the current API.
-    ---
-    parameters:
-        start_node: 
-            type: string
-            description: start node to begin loop search from
-    responses:
-        200:
-        description: Returns intersection between this API's KG and the other API's KG
-        schema:
-            api: User
-            intersection:
-                type: list
-                description: list of intersecting nodes
-    """
-    ApiID = flask.request.args["api"]
-    StartNode = flask.request.args["start_node"]
-    URL = API_ADDRESSBOOK.get(ApiID)
-    PrintDebug("Start Node: " + StartNode)
-
-    LoopID = GenerateRequestID()
-    PrintInfo("Loop search started...")
-    PrintInfo("Loop ID: " + LoopID)
-    LoopLog[LoopID] = StartNode
-
-    PSIRequestID = GenerateRequestID()
-    OutwardNodes = GetOutwardNodes([StartNode])
-    ServerDirectory[PSIRequestID] = OutwardNodes
-
-    PrintInfo("PSI initiating with " + api + " API...")
-    PrintInfo("Request ID: " + PSIRequestID)    
-    response = requests.get(URL + "/PSI", params={"initiator_id" : DATABASE_ID, "end_id" : DATABASE_ID, "psi_request_id" : PSIRequestID, "loop_id" : LoopID, "path": "LT"})
-    response_msg = response.json()
-    PrintInfo("Response: " + response.json()["msg"])
-
-    if response.json()["msg"] == "Found":
-        return {"msg" : "Found"}
-
-    DisposeLoopID(LoopID)
-    return response_msg
-
-
 @app.route("/PSI", methods=["GET"])
 def StartPSI():
     """
@@ -219,33 +153,35 @@ def StartPSI():
     EndAPI = flask.request.args["end_id"]
     PSIRequestID = flask.request.args["psi_request_id"]
     LoopID = flask.request.args["loop_id"]
-    PathList = (flask.request.args["path"]).split(",")
-    PathList.append(DATABASE_ID)
-    PathListString = ",".join(PathList)
-    # print("[DEBUG]: Path List: " + str(PathList))
+    PathSoFar = (flask.request.args["path_so_far"]).split(",")
+    PathSoFar.append(DATABASE_ID)
+    PathSoFarString = ",".join(PathSoFar)
 
     client_items = GetAllEntities()
     Initiator_ID = flask.request.args["initiator_id"]
     PrintInfo("PSI Initiation Request received from  " + Initiator_ID + " API")
     PrintInfo("PSI Request ID: " + PSIRequestID)
-    PrintDebug("Path retrieved: " + str(PathList))
+    PrintDebug("Path retrieved: " + str(PathSoFar))
     URL = API_ADDRESSBOOK.get(Initiator_ID)
 
     Intersection = InitiatePSI(client_items, URL, PSIRequestID)
-    OutwardNodes = GetOutwardNodes(Intersection)   
+    if Intersection == []:
+        return {"loop_found" : False, "paths_searched": [PathSoFar]}
 
-    if OutwardNodes == []:
-        return {"msg" : "Not Found"}
+    OutwardNodes = GetOutwardNodes(Intersection)   
+    if Intersection == [] or OutwardNodes == []:
+        return {"loop_found" : False, "paths_searched": [PathSoFar]}
 
     if (EndAPI == DATABASE_ID):
         StartNode = LoopLog.get(LoopID)
         if StartNode in Intersection or StartNode in OutwardNodes:
-            return {"msg" : "Found"}
+            return {"loop_found" : True, "paths_searched": [PathSoFar], "path_found": PathSoFar}
         else:
-            return {"msg" : "Not Found"}
+            return {"loop_found" : False, "paths_searched": [PathSoFar]}
 
+    PathsSearched = []
     for api in API_ADDRESSBOOK.keys():
-        if api in PathList and api != EndAPI:
+        if api in PathSoFar and api != EndAPI:
             continue
         API_URL = API_ADDRESSBOOK.get(api)
         PSIRequestID = GenerateRequestID()
@@ -253,23 +189,25 @@ def StartPSI():
         
         PrintInfo("Initiating PSI with " + api + " API")
         PrintInfo("Request ID: " + PSIRequestID)
-        # print("[DEBUG]: PSI initiation request sent")
-        response = requests.get(API_URL + "/PSI", params={"initiator_id" : DATABASE_ID, "end_id" : EndAPI, "path" : PathListString , "psi_request_id" : PSIRequestID, "loop_id" : LoopID})
-        PrintInfo("Response: " + response.json()["msg"])
+        response = requests.get(API_URL + "/PSI", params={"initiator_id" : DATABASE_ID, "end_id" : EndAPI, "path_so_far" : PathSoFarString , "psi_request_id" : PSIRequestID, "loop_id" : LoopID})
+        LoopFound = response.json()["loop_found"]
+        PathsSearched += response.json()["paths_searched"]
+        PrintDebug("Path Searched: " + str(PathsSearched))
+        PrintInfo("Response: Loop_found = " + str(response.json()["loop_found"]))
 
-        if response.json()["msg"] == "Found":
-            return {"msg" : "Found"}
+        if LoopFound == True:
+            PathFound = response.json()["path_found"]
+            return {"loop_found" : LoopFound, "paths_searched": PathsSearched, "path_found": PathFound}
 
-    return {"msg" : "Not Found"}
+    return {"loop_found" : LoopFound, "paths_searched": PathsSearched}
 
-
-def InitiatePSI(client_items, URL, PSIRequestID):
+def InitiatePSI(ClientItems, URL, PSIRequestID):
     c = psi.client.CreateWithNewKey(True)
-    request = c.CreateRequest(client_items)
+    request = c.CreateRequest(ClientItems)
     buff = request.SerializeToString()
 
     PrintInfo("PSI set up & response message request sent...")
-    response = requests.get(URL + "/GetSetUpAndResponse", data=buff, params={"ID" : DATABASE_ID, "set_size" : str(len(client_items)), "psi_request_id" : PSIRequestID})
+    response = requests.get(URL + "/GetSetUpAndResponse", data=buff, params={"ID" : DATABASE_ID, "set_size" : str(len(ClientItems)), "psi_request_id" : PSIRequestID})
     response_msg = response.json()
 
     setup_msg = response_msg["setup"]
@@ -286,16 +224,54 @@ def InitiatePSI(client_items, URL, PSIRequestID):
     PrintInfo("Resp message received")
 
     intersection = c.GetIntersection(setup, resp)
-    actualIntersection = [client_items[i] for i in intersection]
+    actualIntersection = [ClientItems[i] for i in intersection]
     PrintDebug("Intersection: " + str(actualIntersection))
     return actualIntersection
+
+@app.route("/TestAPI", methods = ["GET"])
+def TestAPI():
+    """
+    Test function to check if API is set up and running successfully
+    ---
+    responses:
+        200:
+        description: Default message (for testing)
+        schema:
+            api: string
+            msg: 
+                type: string
+                default: API is up and running
+    """
+    return { "api": DATABASE_ID, "msg" : "API is up and running" }
+
+@app.route("/TestPSI", methods=["GET"])
+def TestPSI():
+    """
+    To perform PSI (Private Set Intersection) with another API's KG
+    ---
+    parameters:
+        api_id: string
+    responses:
+        200:
+        description: Returns intersection between this API's KG and the other API's KG
+        schema:
+            api: User
+            intersection:
+                type: list
+                description: list of intersecting nodes
+    """
+    ClientItems = GetAllEntities()
+    API_ID = str(request.args.get("api_id"))
+    URL = API_ADDRESSBOOK.get(API_ID)
+    Intersection = InitiatePSI(ClientItems, URL)
+    return {"api": API_ID, "intersection" : Intersection}
 
 def GetAllEntities():
     q = "use localtransactions MATCH (n) RETURN n"
     resp = conn.query(q, db = "neo4j")
-    nodelist_localtransactiondata = [record["n"]["name"] for record in resp]
-    # PrintDebug("Nodes Retrieved: " + str(nodelist_localtransactiondata))
-    return nodelist_localtransactiondata
+    nodelist = [record["n"]["name"] for record in resp]
+    # PrintDebug("Nodes Retrieved: " + str(nodelist))
+    return nodelist
 
 def GetOutwardNodes(Nodes):
     q = "use localtransactions MATCH (n) WHERE n.name IN " + str(Nodes) + " MATCH (n)-[:LOCAL_TRANSFER|TO*2..]->(m) RETURN m"

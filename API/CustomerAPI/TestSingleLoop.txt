@@ -1,0 +1,20 @@
+@app.route("/TestSingleLoop", methods=["GET"])
+def TestSingleLoop():
+    API_ID = "LT"
+    StartNode = flask.request.args["start_node"]
+    URL = APIAddressBook.get(API_ID)
+
+    LoopID = GenerateRequestID()
+    print("Loop search started, Loop ID: " + LoopID)
+    LoopLog[LoopID] = StartNode
+
+    PSIRequestID = GenerateRequestID()
+    print("[INFO]: Request ID generated: " + PSIRequestID)
+    OutwardNodes = GetOutwardNodes([StartNode])
+    ServerDirectory[PSIRequestID] = OutwardNodes
+
+    response = requests.get(URL + "/PSI", params={"initiator_id" : DATABASE_ID, "end_id" : DATABASE_ID, "psi_request_id" : PSIRequestID, "loop_id" : LoopID})
+    response_msg = response.json()
+ 
+    DisposeLoopID(LoopID)
+    return response_msg
