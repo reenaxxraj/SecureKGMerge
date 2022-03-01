@@ -27,7 +27,10 @@ ServerDirectory = {}
 @app.route("/StartLoopSearch", methods=["GET"])
 def StartLoopSearch():
     """
-    To begin the loop search beginning with the current API.
+    This method is called to begin the loop search from the current API.
+    This method calculates the outward nodes from the start node given and saves it in a server directory.
+    This methods calls the rest of the APIs in the system (API Address Book) signalling them to initiate PSI with itself.
+    This triggers a depth-first search in the system.
     ---
     parameters:
         start_node: 
@@ -40,15 +43,16 @@ def StartLoopSearch():
                 current_api: string
                 report:
                     paths_searched: 
-                        type:           list of lists of strings
-                        description:    list of all paths that were searched
+                        type:           List of lists of strings
+                        description:    List of all paths that were searched
                         example:        [["FT", "LT", "FT"], ["FT", "CU"]]
                     loop_found:
                         type:           Boolean
                         description:    True if loop found; Fales if loop not found
                     path_found:
-                        type:           list of strings
+                        type:           List of strings
                         description:    if loop_found == True, returns the path of the loop. Else, returns None.
+                        required        False
                         example:        ["FT", "LT", "FT"], None
         404:
             description: Start node was not found in this API's KG
@@ -79,7 +83,7 @@ def StartLoopSearch():
         LoopFound = response.json()["loop_found"]
         PathsSearched += response.json()["paths_searched"]
         PrintDebug("Path Searched: " + str(PathsSearched))
-        PrintInfo("Response: Loop_found = " + str(response.json()["loop_found"]))
+        PrintInfo("Response: loop_found = " + str(response.json()["loop_found"]))
 
         if LoopFound == True:
             PathFound = response.json()["path_found"]
@@ -88,67 +92,53 @@ def StartLoopSearch():
     DisposeLoopID(LoopID)
     return {"current_api": DATABASE_ID, "report": {"path_searched": PathsSearched, "loop_found": LoopFound, "path_found": PathFound}}
 
-@app.route("/GetSetUpAndResponse", methods=["GET"])
-def GetSetUpAndResponse():
-    """
-    To begin the loop search beginning with the current API.
-    ---
-    parameters:
-        start_node: 
-            type: string
-            description: start node to begin loop search from
-    responses:
-        200:
-        description: Returns intersection between this API's KG and the other API's KG
-        schema:
-            api: User
-            intersection:
-                type: list
-                description: list of intersecting nodes
-    """
-    PrintInfo("Server setup request received...")
-    PrintInfo("Client ID: " + str(request.args.get("ID")))
-
-    ClientSetSize = int(request.args.get("set_size"))
-    ClientRequestMessage = request.data
-    PrintDebug("Client Set Size: " + str(ClientSetSize))
-
-    dstReq = psi.Request()
-    dstReq.ParseFromString(ClientRequestMessage)
-    ClientRequest = dstReq
-    
-    fpr = 1.0 / (1000000000)
-    s = psi.server.CreateWithNewKey(True)
-
-    PsiRequestID = request.args.get("psi_request_id")
-    ServerSet = ServerDirectory.get(PsiRequestID)
-    # PrintDebug("Datatype: " + str(type(fpr)) + " " + str(type(ClientSetSize)) + " " + str(type(ServerSet[0])))    
-    setup = s.CreateSetupMessage(fpr, ClientSetSize, ServerSet)
-    resp = s.ProcessRequest(ClientRequest)
-
-    setupJson = MessageToJson(setup)
-    respJson = MessageToJson(resp)
-
-    DisposeServerSet(PsiRequestID)
-    return {"setup": setupJson, "resp": respJson}
-
 @app.route("/PSI", methods=["GET"])
 def StartPSI():
     """
-    To begin the loop search beginning with the current API.
+    This method is called by an API signalling to initiate PSI with them (initiating API acting as a server). 
+    This method performs PSI with them (this API acting as a client).
+    This method calculates the intersecting nodes between this API's KG and the outward nodes stored in the server directory of the initiating API.
+    This method stores the calculated intersecting nodes in the server directory.
+    This method calls other APIs in the system signalling them to initiate PSI with itself, continuing the depth-first search.
     ---
     parameters:
-        start_node: 
-            type: string
-            description: start node to begin loop search from
+        end_id: 
+            type: string (API ID)
+            description: API ID of the API to stop the search at (It is also the API that the search started from).
+            required: True
+        psi_request_id:
+            type: string (Request ID)
+            description: Request ID that is generated by the intiating API for each PSI call. This Request ID is used to retrieve the corresponding node list from initiating API's server directing during PSI.
+            required: True
+        loop_id:
+            type: string (Loop ID)
+            description: Loop ID generated for each loop search. Generated by the starting API.
+            required: True
+        path_so_far:
+            type: strings (API IDs) delimited by comma (API IDs)
+            description: List of APIs that have been explored before this API
+            required: True            
+        initiator_id:
+            type: string (API ID)
+            description: API ID of the API that has called this method. This will be used to initiate PSI 
+            required: True
     responses:
         200:
-        description: Returns intersection between this API's KG and the other API's KG
-        schema:
-            api: User
-            intersection:
-                type: list
-                description: list of intersecting nodes
+            description: Returns intersection between this API's KG and the other API's KG
+            schema:
+                loop_found:
+                    type:           Boolean
+                    description:    True if loop found; Fales if loop not found
+                paths_searched: 
+                    type:           List of lists of strings (API IDs)
+                    description:    List of all paths that were searched
+                    example:        [["FT", "LT", "FT"], ["FT", "CU"]]
+                path_found:
+                    type:           List of strings (API IDs)
+                    description:    if loop_found == True, returns the path of the loop. Else, returns None.
+                    required        False
+                    example:        ["FT", "LT", "FT"]
+                
     """
     EndAPI = flask.request.args["end_id"]
     PSIRequestID = flask.request.args["psi_request_id"]
@@ -201,12 +191,77 @@ def StartPSI():
 
     return {"loop_found" : LoopFound, "paths_searched": PathsSearched}
 
+@app.route("/GetSetUpAndResponse", methods=["GET"])
+def GetSetUpAndResponse():
+    """
+    This method is called by an API acting as a client while performing the PSI protocol. 
+    This method initialises a server object. (This API acts as server)
+    This method uses the PSI Request ID given by the calling API to identify the corresponding node list from the server directory.
+    This method then encrypts all elements in the node list using a newly generated secret key and creates a server set up message (serialized protobuf) with the encrypted elements.
+    This method converts the byte stream of data received to a serialized protobuf. 
+    This protobuf is the request message created by the client object in the calling API. 
+    This request message contains a list of nodes that are encrypted by the client's secret key.
+    This method then encrypts the each encrypted node with its server secret key generated earlier and creates a response message (Protobuf Form)
+    Both the set up message and response message are converted to JSON and returned to the calling API.
+    ---
+    parameters:
+        client_id: 
+            type: string (API ID)
+            description: API ID of the API that has called this method. (API ID of the client)
+            required: True
+        set_size:
+            type: int
+            description: Size of client node list.     
+            required: True
+        psi_request_id:
+            type: string (Request ID)
+            description: Request ID of the PSI protocol that is occuring currently. This is used to retrieved the corresponding node list from the server directory.
+            required: True
+    data:
+        description: Request message generated by the client object of the calling API. This message has been serialized to a bytestream from a protobuf format.
+                     This message contains a list of nodes that have been encrypted by the secret key of the client object created by the calling API.
+    responses:
+        200:
+            description: Returns a set up and response message in JSON format.
+            schema:
+                setup: 
+                    type: JSON
+                    description: Protobuf message containing a list of server nodes encrypted using the server's secret key. (Converted to JSON format)
+                resp:
+                    type: JSON
+                    description: Protobuf message containing a list of client nodes encrypted using both the client and server's secret key. (Converted to JSON format)
+    """
+    PrintInfo("Server setup request received...")
+    PrintInfo("Client ID: " + str(request.args.get("client_id")))
+
+    ClientSetSize = int(request.args.get("set_size"))
+    ClientRequestMessage = request.data
+    PrintDebug("Client Set Size: " + str(ClientSetSize))
+
+    dstReq = psi.Request()
+    dstReq.ParseFromString(ClientRequestMessage)
+    ClientRequest = dstReq
+    
+    fpr = 1.0 / (1000000000)
+    s = psi.server.CreateWithNewKey(True)
+
+    PsiRequestID = request.args.get("psi_request_id")
+    ServerSet = ServerDirectory.get(PsiRequestID)
+    setup = s.CreateSetupMessage(fpr, ClientSetSize, ServerSet)
+    resp = s.ProcessRequest(ClientRequest)
+
+    setupJson = MessageToJson(setup)
+    respJson = MessageToJson(resp)
+
+    DisposeServerSet(PsiRequestID)
+    return {"setup": setupJson, "resp": respJson}
+
 def InitiatePSI(client_items, URL, PSIRequestID):
     c = psi.client.CreateWithNewKey(True)
     request = c.CreateRequest(client_items)
     buff = request.SerializeToString()
 
-    response = requests.get(URL + "/GetSetUpAndResponse", data=buff, params={"ID" : DATABASE_ID, "set_size" : str(len(client_items)), "psi_request_id" : PSIRequestID})
+    response = requests.get(URL + "/GetSetUpAndResponse", data=buff, params={"client_id" : DATABASE_ID, "set_size" : str(len(client_items)), "psi_request_id" : PSIRequestID})
     response_msg = response.json()
 
     setup_msg = response_msg["setup"]
@@ -215,16 +270,16 @@ def InitiatePSI(client_items, URL, PSIRequestID):
     dstServer = psi.ServerSetup()
     json_format.Parse(setup_msg, dstServer)
     setup = dstServer
-    print("[DEBUG]: Setup message received from server")
+    PrintInfo("Setup message received from server")
     
     dstResp = psi.Response()
     json_format.Parse(resp_msg, dstResp)
     resp = dstResp
-    print("[DEBUG]: Resp message received from server")
+    PrintInfo("Resp message received from server")
 
     intersection = c.GetIntersection(setup, resp)
     actualIntersection = [client_items[i] for i in intersection]
-    print("[INFO]: Intersection: " + str(actualIntersection))
+    PrintDebug("Intersection: " + str(actualIntersection))
     return actualIntersection
 
 @app.route("/TestAPI", methods = ["GET"])
@@ -246,7 +301,7 @@ def TestAPI():
 @app.route("/TestPSI", methods=["GET"])
 def TestPSI():
     """
-    To perform PSI (Private Set Intersection) with another API's KG
+    Test function to perform PSI (Private Set Intersection) with another API's KG
     ---
     parameters:
         api_id: string
@@ -277,7 +332,7 @@ def GetOutwardNodes(Nodes):
     # PrintDebug("neo4j query: " + q)
     resp = conn.query(q, db = "neo4j")
     OutwardNodes = [record["m"]["name"] for record in resp]
-    print("[DEBUG]: Outward Nodes found: " + str(OutwardNodes))
+    PrintDebug("Outward Nodes found: " + str(OutwardNodes))
     return OutwardNodes
 
 def GenerateRequestID():
