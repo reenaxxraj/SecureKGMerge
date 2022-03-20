@@ -14,12 +14,12 @@ app = Flask(__name__)
 api = Api(app)
 conn = Neo4jConnection(uri="bolt://localhost:7687", user="reena", pwd="1234")
 
-DATABASE_ID = "FT"
+DATABASE_ID = "RM"
 REQUEST_ID_LENGTH = 10
 LT_URL = "http://127.0.0.1:5000"
-ST_URL = "http://127.0.0.1:5002"
-CU_URL = "http://127.0.0.1:5003"
-API_ADDRESSBOOK = {"CU" : CU_URL,"LT" : LT_URL, "ST" : ST_URL}
+CP_URL = "http://127.0.0.1:5002"
+# CU_URL = "http://127.0.0.1:5003"
+API_ADDRESSBOOK = {"LT" : LT_URL, "CP" : CP_URL}
 
 LoopLog = {}
 ServerDirectory = {}
@@ -328,7 +328,7 @@ def GetAllEntities():
     return nodelist
 
 def GetOutwardNodes(Nodes):
-    q = "use foreigntransactions MATCH (n) WHERE n.name IN " + str(Nodes) + " MATCH (n)-[:OVERSEA_TRANSFER_OUT|TO|OVERSEA_TRANSFER_IN|FROM*1..]->(m) RETURN m"
+    q = "use foreigntransactions MATCH (n) WHERE n.name IN " + str(Nodes) + " MATCH (n)-[:TRANSFER|TO*2..]->(m) RETURN m"
     # PrintDebug("neo4j query: " + q)
     resp = conn.query(q, db = "neo4j")
     OutwardNodes = [record["m"]["name"] for record in resp]

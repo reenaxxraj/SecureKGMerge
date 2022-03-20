@@ -16,10 +16,10 @@ conn = Neo4jConnection(uri="bolt://localhost:7687", user="reena", pwd="1234")
 
 DATABASE_ID = "LT"
 REQUEST_ID_LENGTH = 10
-FT_URL = "http://127.0.0.1:5001"
-ST_URL = "http://127.0.0.1:5002"
-CU_URL = "http://127.0.0.1:5003"
-API_ADDRESSBOOK = {"CU" : CU_URL, "FT" : FT_URL, "ST" : ST_URL}
+RM_URL = "http://127.0.0.1:5001"
+CP_URL = "http://127.0.0.1:5002"
+# CU_URL = "http://127.0.0.1:5003"
+API_ADDRESSBOOK = {"RM" : RM_URL, "CP" : CP_URL}
 
 LoopLog = {}
 ServerDirectory = {}

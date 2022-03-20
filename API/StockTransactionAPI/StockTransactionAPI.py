@@ -14,12 +14,12 @@ app = Flask(__name__)
 api = Api(app)
 conn = Neo4jConnection(uri="bolt://localhost:7687", user="reena", pwd="1234")
 
-DATABASE_ID = "ST"
+DATABASE_ID = "CP"
 REQUEST_ID_LENGTH = 10
-FT_URL = "http://127.0.0.1:5001"
+RM_URL = "http://127.0.0.1:5001"
 LT_URL = "http://127.0.0.1:5000"
-CU_URL = "http://127.0.0.1:5003"
-API_ADDRESSBOOK = {"CU" : CU_URL,"FT" : FT_URL, "LT" : LT_URL}
+# CU_URL = "http://127.0.0.1:5003"
+API_ADDRESSBOOK = {"RM" : RM_URL, "LT" : LT_URL}
 
 LoopLog = {}
 ServerDirectory = {}
@@ -158,7 +158,8 @@ def StartPSI():
     if Intersection == []:
         return {"loop_found" : False, "paths_searched": [PathSoFar]}
 
-    OutwardNodes = GetOutwardNodes(Intersection)   
+    OutwardNodes = GetOutwardNodes(Intersection)  
+    PrintDebug(str(OutwardNodes)) 
     if Intersection == [] or OutwardNodes == []:
         return {"loop_found" : False, "paths_searched": [PathSoFar]}
 
@@ -176,7 +177,10 @@ def StartPSI():
         API_URL = API_ADDRESSBOOK.get(api)
         PSIRequestID = GenerateRequestID()
         ServerDirectory[PSIRequestID] = OutwardNodes
-        
+        PrintDebug(str(OutwardNodes))
+        PrintDebug(str(ServerDirectory.keys()))
+        PrintDebug(str(ServerDirectory.get(ServerDirectory.values())))
+
         PrintInfo("Initiating PSI with " + api + " API")
         PrintInfo("Request ID: " + PSIRequestID)
         response = requests.get(API_URL + "/PSI", params={"initiator_id" : DATABASE_ID, "end_id" : EndAPI, "path_so_far" : PathSoFarString , "psi_request_id" : PSIRequestID, "loop_id" : LoopID})
@@ -246,7 +250,9 @@ def GetSetUpAndResponse():
     s = psi.server.CreateWithNewKey(True)
 
     PsiRequestID = request.args.get("psi_request_id")
+    PrintDebug(PsiRequestID)
     ServerSet = ServerDirectory.get(PsiRequestID)
+    # PrintDebug(ServerSet)
     setup = s.CreateSetupMessage(fpr, ClientSetSize, ServerSet)
     resp = s.ProcessRequest(ClientRequest)
 
@@ -328,7 +334,7 @@ def GetAllEntities():
     return nodelist
 
 def GetOutwardNodes(Nodes):
-    q = "use stocktransactions MATCH (n) WHERE n.name IN " + str(Nodes) + " MATCH (n)-[:BUY_STOCKS|OF*2..]->(m) RETURN m"
+    q = "use stocktransactions MATCH (n) WHERE n.name IN " + str(Nodes) + " MATCH (n)-[:MAKES_PAYMENT_OF|VIA|TO*3..]->(m) RETURN m"
     # PrintDebug("neo4j query: " + q)
     resp = conn.query(q, db = "neo4j")
     OutwardNodes = [record["m"]["name"] for record in resp]
