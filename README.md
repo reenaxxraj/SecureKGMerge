@@ -16,8 +16,6 @@ and then performs PSI between any two KGs. Using this technique, we attempt to d
 <!-- GETTING STARTED -->
 ## Getting Started
 
-To get a local copy up and running follow these simple example steps.
-
 ### Prerequisites
 
 * Python3
@@ -42,6 +40,7 @@ pip install colorama
 ``` 
 
 ### Deployment
+Follow these steps to deploy and test this system.
 
 1. Clone the repo
    ```sh
