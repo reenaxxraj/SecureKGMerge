@@ -1,0 +1,48 @@
+//clear data
+MATCH (n)
+DETACH DELETE n;
+//Customer Nodes1
+
+LOAD CSV WITH HEADERS FROM 'file:///CustomerDetails_Remittance.csv' AS c
+CREATE (cust:Customer {name: c.FullName, AccountID: c.AccountID, AnnualIncome:c.AnnualIncome, Address: c.Address, PhoneNumber: c.PhoneNumber, PoliticallyExposed: c.PoliticallyExposed, Employer:c.Employer});
+
+LOAD CSV WITH HEADERS FROM 'file:///Remittance.csv' AS t
+CREATE (ot:OverseasTransfer {name: "$"+ t.Amount, AccountID:t.AccountID,TransferID:t.TransferID, TransactionType:t.TransactionType, Country:t.Country, CounterpartyName: t.CounterpartyName, BankCode:t.BankCode, BankName:t.BankName, CounterpartyAccountID:t.CounterpartyAccountID, Amount:toInteger(t.Amount), Currency:t.Currency, Timestamp:t.Timestamp});
+
+LOAD CSV WITH HEADERS FROM 'file:///Remittance.csv' AS a
+MERGE (oa:OverseasAccounts {name: a.BankName,Country:a.Country,BankCode:a.BankCode, BankName:a.BankName});
+
+MATCH
+    (ot:OverseasTransfer),
+    (cust:Customer)
+WHERE ot.TransactionType =~ "Out" AND ot.AccountID =~ cust.AccountID
+CREATE (cust)-[r:TRANSFER]->(ot);
+
+MATCH
+    (ot:OverseasTransfer),
+    (cust:Customer)
+WHERE ot.TransactionType =~ "In" AND ot.AccountID =~ cust.AccountID
+CREATE (ot)-[r:TO]->(cust);
+
+MATCH
+    (ot:OverseasTransfer),
+    (oa:OverseasAccounts)
+WHERE ot.TransactionType =~ "Out" AND ot.BankCode =~ oa.BankCode
+CREATE (ot)-[r:TO]->(oa);
+
+MATCH
+    (ot:OverseasTransfer),
+    (oa:OverseasAccounts)
+WHERE ot.TransactionType =~ "In" AND ot.BankCode =~ oa.BankCode
+CREATE (oa)-[t:TRANSFER]->(ot);
+
+MATCH
+    (ot:OverseasTransfer)
+MERGE (ctrparty:CounterParty {name: ot.CounterpartyName});
+
+MATCH
+    (ot:OverseasTransfer),
+    (ctrparty:CounterParty),
+    (oa:OverseasAccounts)
+WHERE ot.BankCode =~ oa.BankCode AND ot.CounterpartyName =~ ctrparty.name   
+MERGE (ctrparty)-[t:TRANSFER]->(oa);

@@ -1,0 +1,34 @@
+MATCH (n)
+DETACH DELETE n;
+
+LOAD CSV WITH HEADERS FROM 'file:///CustomerData_CreditCardPayments.csv' AS c
+CREATE (cust:Customer {name: c.FullName, AccountID: c.AccountID,  Address: c.Address, PhoneNumber: c.PhoneNumber});
+
+LOAD CSV WITH HEADERS FROM 'file:///CreditCardPayments.csv' AS t
+CREATE (credit:CreditCardPayment {name: "$"+ t.Amount, AccountID:t.AccountID,TransactionID:t.TransactionID, CounterpartyName: t.CompanyName, BankCode:t.BankCode, BankName:t.BankName, CardNumber:t.CardNumber, CardType:t.CardType, CounterpartyAccountID:t.CounterpartyAccountID, Amount:toInteger(t.Amount),Timestamp:t.Timestamp});
+
+LOAD CSV WITH HEADERS FROM 'file:///CreditCardPayments.csv' AS a
+CREATE (oa:OverseasAccounts {name: a.BankName,BankCode:a.BankCode, BankName:a.BankName});
+
+MATCH
+    (credit:CreditCardPayment),
+    (cust:Customer)
+WHERE credit.AccountID =~ cust.AccountID
+CREATE (cust)-[r:MAKES_PAYMENT_OF]->(credit);
+
+MATCH
+    (oa:OverseasAccounts),
+    (credit:CreditCardPayment)
+WHERE oa.BankCode =~ credit.BankCode
+CREATE (credit)-[r:VIA]->(oa);
+
+MATCH
+    (credit:CreditCardPayment)
+CREATE (ctrparty:CounterParty {name: credit.CounterpartyName, AccountID:credit.CounterpartyAccountID});
+
+MATCH
+    (ctrparty:CounterParty),
+    (oa:OverseasAccounts),
+    (credit:CreditCardPayment)
+WHERE credit.BankCode =~ oa.BankCode AND credit.CounterpartyAccountID =~ ctrparty.AccountID  
+CREATE (oa)-[t:TO]->(ctrparty);

@@ -1,0 +1,93 @@
+MATCH (n)
+DETACH DELETE n;
+
+LOAD CSV WITH HEADERS FROM 'file:///CustomerData.csv' AS c
+CREATE (cust:Customer {name: c.FullName, AccountID: c.AccountID, Address: c.Address, PhoneNumber: c.PhoneNumber});
+
+LOAD CSV WITH HEADERS FROM 'file:///LocalBankTransfers.csv' AS lt
+CREATE (t:LocalTransfer {name: "$" + lt.Amount, TransferID: lt.TransferID, AccountID:lt.AccountID, CounterpartyAccountID:lt.CounterpartyAccountID, Amount:toInteger(lt.Amount), Timestamp:lt.Timestamp});
+
+MATCH
+    (cust:Customer),
+    (lt:LocalTransfer)
+WHERE lt.AccountID =~ cust.AccountID
+CREATE (cust)-[r:LOCAL_TRANSFER]->(lt);
+
+MATCH
+    (cust:Customer),
+    (lt:LocalTransfer)
+WHERE lt.CounterpartyAccountID =~ cust.AccountID
+CREATE (lt)-[r:TO]->(cust);
+
+LOAD CSV WITH HEADERS FROM 'file:///CreditCardPayments.csv' AS t
+CREATE (credit:CreditCardPayment {name: "$"+ t.Amount, AccountID:t.AccountID,TransactionID:t.TransactionID, CounterpartyName: t.CompanyName, BankCode:t.BankCode, BankName:t.BankName, CardNumber:t.CardNumber, CardType:t.CardType, CounterpartyAccountID:t.CounterpartyAccountID, Amount:toInteger(t.Amount),Timestamp:t.Timestamp});
+
+LOAD CSV WITH HEADERS FROM 'file:///OverseasAccounts.csv' AS a
+CREATE (oa:OverseasAccounts {name: a.BankName, BankCode:a.BankCode, BankName:a.BankName, AccountID: a.AccountID});
+
+MATCH
+    (credit:CreditCardPayment),
+    (cust:Customer)
+WHERE credit.AccountID =~ cust.AccountID
+CREATE (cust)-[r:MAKES_PAYMENT_OF]->(credit);
+
+MATCH
+    (oa:OverseasAccounts),
+    (credit:CreditCardPayment)
+WHERE oa.BankCode =~ credit.BankCode
+CREATE (credit)-[r:VIA]->(oa);
+
+MATCH
+    (credit:CreditCardPayment)
+CREATE (ctrparty:CounterParty {name: credit.CounterpartyName, AccountID:credit.CounterpartyAccountID});
+
+MATCH
+    (ctrparty:CounterParty),
+    (oa:OverseasAccounts),
+    (credit:CreditCardPayment)
+WHERE credit.BankCode =~ oa.BankCode AND credit.CounterpartyAccountID =~ ctrparty.AccountID  
+CREATE (oa)-[t:TO]->(ctrparty);
+
+
+LOAD CSV WITH HEADERS FROM 'file:///Remittance.csv' AS t
+CREATE (ot:OverseasTransfer {name: "$"+ t.Amount, AccountID:t.AccountID,TransferID:t.TransferID, TransactionType:t.TransactionType, Country:t.Country, CounterpartyName: t.CounterpartyName, BankCode:t.BankCode, BankName:t.BankName, CounterpartyAccountID:t.CounterpartyAccountID, Amount:toInteger(t.Amount), Currency:t.Currency, Timestamp:t.Timestamp});
+
+MATCH
+    (ot:OverseasTransfer),
+    (cust:Customer)
+WHERE ot.TransactionType =~ "Out" AND ot.AccountID =~ cust.AccountID
+CREATE (cust)-[r:TRANSFER]->(ot);
+
+MATCH
+    (ot:OverseasTransfer),
+    (cust:Customer)
+WHERE ot.TransactionType =~ "In" AND ot.AccountID =~ cust.AccountID
+CREATE (ot)-[r:TO]->(cust);
+
+MATCH
+    (ot:OverseasTransfer),
+    (oa:OverseasAccounts)
+WHERE ot.TransactionType =~ "Out" AND ot.BankCode =~ oa.BankCode
+CREATE (ot)-[r:TO]->(oa);
+
+MATCH
+    (ot:OverseasTransfer),
+    (oa:OverseasAccounts)
+WHERE ot.TransactionType =~ "In" AND ot.BankCode =~ oa.BankCode
+CREATE (oa)-[t:TRANSFER]->(ot);
+
+MATCH
+    (ot:OverseasTransfer)
+MERGE (ctrparty:CounterParty {name: ot.CounterpartyName});
+
+MATCH
+    (ot:OverseasTransfer),
+    (ctrparty:CounterParty),
+    (oa:OverseasAccounts)
+WHERE ot.BankCode =~ oa.BankCode AND ot.CounterpartyName =~ ctrparty.name   
+MERGE (ctrparty)-[t:TRANSFER]->(oa);
+
+
+
+
+

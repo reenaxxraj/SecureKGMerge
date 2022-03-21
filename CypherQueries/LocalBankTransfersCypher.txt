@@ -1,0 +1,20 @@
+MATCH (n)
+DETACH DELETE n;
+
+LOAD CSV WITH HEADERS FROM 'file:///CustomerDetails_LocalBankTransfer.csv' AS c
+CREATE (cust:Customer {name: c.FullName, AccountID: c.AccountID,  Address: c.Address});
+
+LOAD CSV WITH HEADERS FROM 'file:///LocalBankTransfers.csv' AS lt
+CREATE (t:LocalTransfer {name: "$" + lt.Amount, TransferID: lt.TransferID, AccountID:lt.AccountID, CounterpartyAccountID:lt.CounterpartyAccountID, Amount:toInteger(lt.Amount), Timestamp:lt.Timestamp});
+
+MATCH
+    (cust:Customer),
+    (lt:LocalTransfer)
+WHERE lt.AccountID =~ cust.AccountID
+CREATE (cust)-[r:LOCAL_TRANSFER]->(lt);
+
+MATCH
+    (cust:Customer),
+    (lt:LocalTransfer)
+WHERE lt.CounterpartyAccountID =~ cust.AccountID
+CREATE (lt)-[r:TO]->(cust);
