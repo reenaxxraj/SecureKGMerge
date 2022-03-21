@@ -39,25 +39,6 @@ pip install google.protobuf
 pip install colorama
 ``` 
 
-### Deployment
-Follow these steps to deploy and test this system.
-
-1. Clone the repo
-   ```sh
-   git clone https://github.com/reenaxxraj/SecureKGMerge.git
-   ```
-2. Load KGs into Neo4j desktop and deploy graph database
-   ```sh
-
-   ```
-3. Run python files.
-4. Query 
-
-<p align="right">(<a href="#top">back to top</a>)</p>
-
-
-
-
 <!-- LICENSE -->
 ## License
 
